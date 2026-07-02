@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Corsair carrier landing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Saira+Stencil+One&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sky: #A8C8E4; --sea: #14456B; --deck: #4A4A46; --deck-dark: #35352F;
+    --signal: #F5B942; --paper: #F2EDE0; --ink: #1E2A33; --muted: #5C6B75;
+    --danger: #B03A2E; --ok: #2E6B4F;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: 'Barlow', sans-serif;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px 16px;
+  }
+  .sheet { width: 100%; max-width: 720px; }
+  header { border-bottom: 3px solid var(--ink); padding-bottom: 10px; margin-bottom: 6px;
+    display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px; }
+  h1 { font-family: 'Saira Stencil One', sans-serif; font-size: clamp(26px, 5vw, 40px);
+    letter-spacing: 0.04em; font-weight: 400; }
+  .stamp { font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
+  .brief { font-size: 14px; color: var(--muted); margin: 8px 0 16px; line-height: 1.5; }
+  .brief b { color: var(--ink); font-weight: 600; }
+  .hud { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+  .hud div { border: 1.5px solid var(--ink); padding: 6px 10px; background: #fff; }
+  .hud .label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--muted); border: 0; padding: 0; background: none; }
+  .hud .val { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums;
+    border: 0; padding: 0; background: none; }
+  canvas { width: 100%; display: block; border: 3px solid var(--ink); background: var(--sky);
+    touch-action: none; cursor: pointer; }
+  .controls { display: flex; gap: 10px; margin-top: 12px; align-items: stretch; flex-wrap: wrap; }
+  button { font-family: 'Barlow', sans-serif; font-size: 14px; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase; border: 2px solid var(--ink);
+    background: #fff; color: var(--ink); padding: 12px 18px; cursor: pointer;
+    user-select: none; -webkit-user-select: none; }
+  button:active { transform: translateY(1px); }
+  #pwr { background: var(--signal); flex: 1; min-width: 160px; }
+  #lso { font-size: 14px; margin-top: 12px; padding: 10px 12px; border-left: 4px solid var(--ink);
+    background: #fff; min-height: 42px; }
+  #lso.bad { border-color: var(--danger); }
+  #lso.good { border-color: var(--ok); }
+  footer { margin-top: 14px; font-size: 12px; color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
+  @media (max-width: 480px) { .hud { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header>
+    <h1>Corsair carrier landing</h1>
+    <span class="stamp">Field carrier practice &middot; 1943</span>
+  </header>
+  <p class="brief"><b>Mission:</b> hold <b>space</b> (or the power button) to climb, release to descend.
+  Touch down on the deck with a gentle sink rate and modest speed to catch a wire.
+  Too fast &rarr; barricade. Too steep &rarr; new landing gear. Short &rarr; swimming.</p>
+
+  <div class="hud">
+    <div><span class="label">Speed</span><br><span class="val" id="spd">0 kt</span></div>
+    <div><span class="label">Sink rate</span><br><span class="val" id="snk">0.0</span></div>
+    <div><span class="label">Traps</span><br><span class="val" id="traps">0</span></div>
+    <div><span class="label">Passes</span><br><span class="val" id="pass">0</span></div>
+  </div>
+
+  <canvas id="cv" width="720" height="380" role="img" aria-label="Side view of an F4U Corsair approaching an aircraft carrier"></canvas>
+
+  <div class="controls">
+    <button id="pwr">&#9650; Hold for power</button>
+    <button id="rst">New approach</button>
+  </div>
+  <div id="lso">LSO: &ldquo;Call the ball.&rdquo;</div>
+  <footer>One button. Harder than it looks &mdash; ask the 1943 U.S. Navy.</footer>
+</div>
+
+<script>
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const W = 720, H = 380, SEA = 300, DECK = 235, DECKX = 490, DECKW = 210;
+let plane, thrust = false, state, traps = 0, passes = 0;
+
+function reset() {
+  plane = { x: -60, y: 100, vx: 2.1, vy: 0.2, rot: 0 };
+  state = 'fly';
+  lsoSay('LSO: \u201CCall the ball.\u201D', '');
+}
+function lsoSay(t, cls) {
+  const el = document.getElementById('lso');
+  el.textContent = t; el.className = cls;
+}
+reset();
+
+const pb = document.getElementById('pwr');
+function setThrust(v, e) { if (e && e.cancelable) e.preventDefault(); thrust = v; }
+pb.addEventListener('mousedown', e => setThrust(true, e));
+pb.addEventListener('touchstart', e => setThrust(true, e), { passive: false });
+['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(ev => pb.addEventListener(ev, e => setThrust(false, e)));
+cv.addEventListener('pointerdown', e => setThrust(true, e));
+cv.addEventListener('pointerup', e => setThrust(false, e));
+cv.addEventListener('pointerleave', e => setThrust(false, e));
+window.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); thrust = true; } });
+window.addEventListener('keyup', e => { if (e.code === 'Space') thrust = false; });
+document.getElementById('rst').addEventListener('click', reset);
+
+function step() {
+  if (state === 'fly') {
+    if (thrust) { plane.vy -= 0.055; plane.vx += 0.008; }
+    else { plane.vy += 0.045; plane.vx -= 0.004; }
+    plane.vy = Math.max(-1.6, Math.min(2.2, plane.vy));
+    plane.vx = Math.max(1.2, Math.min(3.2, plane.vx));
+    plane.x += plane.vx; plane.y += plane.vy;
+    plane.rot = Math.max(-0.25, Math.min(0.3, plane.vy * 0.15));
+    if (plane.y < 22) { plane.y = 22; plane.vy = 0; }
+
+    const overDeck = plane.x > DECKX + 15 && plane.x < DECKX + DECKW - 20;
+    if (overDeck && plane.y >= DECK - 10) {
+      passes++; document.getElementById('pass').textContent = passes;
+      if (plane.vy <= 1.05 && plane.vx <= 2.6) {
+        state = 'trap'; traps++;
+        document.getElementById('traps').textContent = traps;
+        lsoSay('LSO: \u201COK pass! Wire three. Nicely done.\u201D', 'good');
+      } else if (plane.vy > 1.05) {
+        state = 'crash';
+        lsoSay('LSO: \u201CSink rate! You planted it. Gear\u2019s in the hangar deck now.\u201D', 'bad');
+      } else {
+        state = 'crash';
+        lsoSay('LSO: \u201CToo fast \u2014 floated every wire and found the barricade.\u201D', 'bad');
+      }
+    }
+    if (plane.y >= SEA - 6 && !overDeck && plane.x < DECKX + DECKW) {
+      state = 'splash'; passes++;
+      document.getElementById('pass').textContent = passes;
+      lsoSay('LSO: \u201C...that\u2019s a swim call. Whale boat\u2019s on the way.\u201D', 'bad');
+    }
+    if (plane.x > DECKX + DECKW - 25 && plane.x < DECKX + DECKW && plane.y < DECK - 10) {
+      lsoSay('LSO: \u201CBolter, bolter! Go around.\u201D', '');
+    }
+    if (plane.x > W + 60) { plane.x = -60; plane.y = Math.min(plane.y, 150); }
+  }
+  if (state === 'trap' && plane.x < DECKX + DECKW - 45) { plane.x += Math.max(0.3, plane.vx *= 0.9); }
+
+  draw();
+  document.getElementById('spd').textContent = Math.round(plane.vx * 38) + ' kt';
+  const s = document.getElementById('snk');
+  s.textContent = (Math.round(plane.vy * 10) / 10).toFixed(1);
+  s.style.color = plane.vy > 1.05 ? '#B03A2E' : '#1E2A33';
+  requestAnimationFrame(step);
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#A8C8E4'; ctx.fillRect(0, 0, W, SEA);
+  ctx.fillStyle = '#14456B'; ctx.fillRect(0, SEA, W, H - SEA);
+  ctx.fillStyle = '#E9F1F8';
+  ctx.beginPath(); ctx.ellipse(140, 66, 44, 13, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(340, 44, 32, 11, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#4A4A46';
+  ctx.beginPath();
+  ctx.moveTo(DECKX - 10, DECK); ctx.lineTo(DECKX + DECKW, DECK);
+  ctx.lineTo(DECKX + DECKW - 8, SEA + 22); ctx.lineTo(DECKX + 32, SEA + 22);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#35352F'; ctx.fillRect(DECKX - 10, DECK - 4, DECKW + 10, 6);
+  ctx.fillStyle = '#6B6B63'; ctx.fillRect(DECKX + DECKW - 46, DECK - 38, 28, 34);
+  ctx.fillStyle = '#F5B942';
+  for (let i = 0; i < 4; i++) ctx.fillRect(DECKX + 34 + i * 40, DECK - 3, 3, 4);
+
+  ctx.save();
+  ctx.translate(plane.x, plane.y); ctx.rotate(plane.rot);
+  ctx.fillStyle = state === 'crash' ? '#B03A2E' : '#2E5E52';
+  ctx.beginPath(); ctx.ellipse(0, 0, 28, 6.5, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-4, -2); ctx.quadraticCurveTo(-2, 9, -15, 11);
+  ctx.lineTo(-19, 4); ctx.quadraticCurveTo(-8, 4, -6, -1); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-2, -2); ctx.quadraticCurveTo(2, -10, 15, -9);
+  ctx.lineTo(17, -4); ctx.quadraticCurveTo(6, -5, 3, -1); ctx.closePath(); ctx.fill();
+  ctx.fillRect(-28, -9, 5, 10);
+  ctx.fillStyle = '#12332B'; ctx.fillRect(2, -8, 9, 4);
+  ctx.strokeStyle = '#1B443B'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(28, -11); ctx.lineTo(28, 11); ctx.stroke();
+  if (state === 'splash') {
+    ctx.fillStyle = '#E9F1F8';
+    ctx.beginPath(); ctx.ellipse(0, 11, 32, 6, 0, 0, 7); ctx.fill();
+  }
+  ctx.restore();
+
+  if (state === 'trap') {
+    ctx.strokeStyle = '#3A2A12'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(DECKX + 74, DECK);
+    ctx.quadraticCurveTo(plane.x, plane.y + 8, DECKX + 154, DECK);
+    ctx.stroke();
+  }
+}
+step();
+</script>
+</body>
+</html>
